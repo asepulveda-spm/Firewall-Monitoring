@@ -219,7 +219,8 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
         try:
             import requests
             headers = {"Content-Type": "application/json"}
-            requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=8)
+            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=8)
+            print(f"  [*] Lark Webhook Response: {res.status_code} - {res.text}", flush=True)
         except Exception as e:
             print(f"  [!] Failed to send Lark notification: {e}", flush=True)
 
