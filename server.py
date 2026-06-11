@@ -49,6 +49,7 @@ socketio = SocketIO(
 
 PORT = int(os.environ.get('PORT', 3000))
 CHECK_INTERVAL = 10  # check every 10 seconds (responsive firewall checks)
+LARK_WEBHOOK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/1bce6561-7a37-40bc-9a9b-b72db594c990"
 
 def safe_emit(event, data):
     """Emit a socket event, swallowing errors so monitoring threads never crash."""
@@ -142,6 +143,90 @@ def check_tcp_port(hostname, port, timeout=3.0):
         return False
 
 
+def format_downtime_duration(seconds):
+    if seconds is None:
+        return "Unknown"
+    mins, secs = divmod(int(seconds), 60)
+    hours, mins = divmod(mins, 60)
+    if hours > 0:
+        return f"{hours}h {mins}m {secs}s"
+    elif mins > 0:
+        return f"{mins}m {secs}s"
+    else:
+        return f"{secs}s"
+
+
+def send_lark_notification(host, status, started_at=None, duration_seconds=None):
+    """Send interactive card notifications to Lark webhook when a firewall changes status."""
+    if not LARK_WEBHOOK_URL:
+        return
+
+    label = host.get('label', host.get('hostname'))
+    hostname = host.get('hostname')
+    branch_type = host.get('branch_type', 'SATELLITE')
+    timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    if status == 'DOWN':
+        title = "🚨 Firewall Outage Alert"
+        color = "red"
+        content = (
+            f"**Device:** {label} ({hostname})\n"
+            f"**Branch Type:** {branch_type}\n"
+            f"**Status:** 🔴 OFFLINE / DOWN\n"
+            f"**Outage Time:** {timestamp_str}\n\n"
+            f"⚠️ *Please check network connectivity or console access immediately.*"
+        )
+    else:
+        title = "✅ Firewall Recovery Notification"
+        color = "green"
+        dur_str = format_downtime_duration(duration_seconds)
+        content = (
+            f"**Device:** {label} ({hostname})\n"
+            f"**Branch Type:** {branch_type}\n"
+            f"**Status:** 🟢 ONLINE / RECOVERED\n"
+            f"**Downtime Started:** {started_at or 'N/A'}\n"
+            f"**Restored At:** {timestamp_str}\n"
+            f"**Total Downtime:** {dur_str}\n\n"
+            f"✔️ *System health check restored successfully.*"
+        )
+
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "config": {
+                "wide_screen_mode": True
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": title
+                },
+                "template": color
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": content
+                    }
+                }
+            ]
+        }
+    }
+
+    def post_request():
+        try:
+            import requests
+            headers = {"Content-Type": "application/json"}
+            requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=8)
+        except Exception as e:
+            print(f"  [!] Failed to send Lark notification: {e}", flush=True)
+
+    # Spawn thread to avoid blocking check flow
+    threading.Thread(target=post_request, daemon=True).start()
+
+
 def run_single_check(host):
     """Perform health checks on a firewall once (ICMP Ping + TCP Console Port)."""
     hostname = host['hostname']
@@ -181,6 +266,7 @@ def run_single_check(host):
             'timestamp': datetime.now().isoformat()
         })
         print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname})", flush=True)
+        send_lark_notification(host, 'DOWN')
 
     elif not prev_state.get('alive', True) and alive:
         # Firewall recovered
@@ -190,6 +276,12 @@ def run_single_check(host):
             'timestamp': datetime.now().isoformat()
         })
         print(f"  [+] FIREWALL RECOVERED: {host['label']} ({hostname})", flush=True)
+        
+        # Fetch latest completed downtime to show duration and start time
+        last_down = db.get_latest_closed_downtime(host_id)
+        started_at = last_down.get('started_at') if last_down else None
+        duration_seconds = last_down.get('duration_seconds') if last_down else None
+        send_lark_notification(host, 'UP', started_at=started_at, duration_seconds=duration_seconds)
 
     state = {
         'alive': alive,

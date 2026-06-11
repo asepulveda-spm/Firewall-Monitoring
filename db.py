@@ -259,6 +259,21 @@ def get_downtimes(host_id, range_modifier='-24 hours'):
     return [dict(r) for r in rows]
 
 
+def get_latest_closed_downtime(host_id):
+    """Get the most recent completed downtime event for a host."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT started_at, ended_at, duration_seconds
+           FROM downtimes
+           WHERE host_id = ? AND ended_at IS NOT NULL
+           ORDER BY ended_at DESC
+           LIMIT 1""",
+        (host_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+
 # ─── Maintenance ────────────────────────────────────────────────────────────
 
 def cleanup():
