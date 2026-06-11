@@ -28,6 +28,7 @@ if sys.platform == 'win32':
 
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
+import requests
 
 import db
 
@@ -47,7 +48,7 @@ socketio = SocketIO(
     engineio_logger=False,
 )
 
-PORT = int(os.environ.get('PORT', 3000))
+PORT = int(os.environ.get('PORT', 5001))
 CHECK_INTERVAL = 10  # check every 10 seconds (responsive firewall checks)
 LARK_WEBHOOK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/1bce6561-7a37-40bc-9a9b-b72db594c990"
 
@@ -86,6 +87,7 @@ def parse_host_info(url_or_ip):
 
 ping_threads = {}    # hostname -> threading.Event (stop signal)
 host_states = {}     # hostname -> {'alive': bool, 'ping_alive': bool, 'console_alive': bool}
+notified_down = set()  # hostnames already notified as DOWN (cleared when they recover)
 
 
 def parse_ping_output(output):
@@ -159,12 +161,15 @@ def format_downtime_duration(seconds):
 def send_lark_notification(host, status, started_at=None, duration_seconds=None):
     """Send interactive card notifications to Lark webhook when a firewall changes status."""
     if not LARK_WEBHOOK_URL:
+        print("  [!] Lark: LARK_WEBHOOK_URL is empty, skipping.", flush=True)
         return
 
     label = host.get('label', host.get('hostname'))
     hostname = host.get('hostname')
     branch_type = host.get('branch_type', 'SATELLITE')
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    print(f"  [*] Lark: Sending {status} notification for {label} ({hostname})...", flush=True)
 
     if status == 'DOWN':
         title = "🚨 Firewall Outage Alert"
@@ -217,15 +222,15 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
 
     def post_request():
         try:
-            import requests
+            print(f"  [*] Lark: POSTing to webhook...", flush=True)
             headers = {"Content-Type": "application/json"}
-            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=8)
-            print(f"  [*] Lark Webhook Response: {res.status_code} - {res.text}", flush=True)
+            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=10)
+            print(f"  [*] Lark: Response {res.status_code} — {res.text}", flush=True)
         except Exception as e:
-            print(f"  [!] Failed to send Lark notification: {e}", flush=True)
+            print(f"  [!] Lark: POST failed — {e}", flush=True)
 
-    # Spawn thread to avoid blocking check flow
-    threading.Thread(target=post_request, daemon=True).start()
+    t = threading.Thread(target=post_request, daemon=False)
+    t.start()
 
 
 def run_single_check(host):
@@ -252,42 +257,37 @@ def run_single_check(host):
     # Record result in DB
     db.record_ping(host_id, latency, ping_alive, console_alive, alive)
 
-    # Get previous state from memory or query DB
     prev_state = host_states.get(hostname)
-    if prev_state is None:
-        # Load from DB downtime history
-        active_down = db.has_open_downtime(host_id)
-        prev_state = {'alive': active_down is None}
+
+    print(f"  [~] CHECK {host['label']} ({hostname}): alive={alive} notified_down={hostname in notified_down}", flush=True)
 
     if not alive:
-        # Firewall is offline (either just went down or remains down)
-        if prev_state.get('alive', True):
+        if hostname not in notified_down:
+            # First time detecting this host as down — start downtime record
+            notified_down.add(hostname)
             db.start_downtime(host_id)
             safe_emit('host:down', {
                 'hostname': hostname,
                 'timestamp': datetime.now().isoformat()
             })
-            print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname})", flush=True)
-        else:
-            print(f"  [!] FIREWALL REMAINS DOWN: {host['label']} ({hostname})", flush=True)
-        
-        # Always notify when a scanned host is down
+        # Always notify Lark every check while down
+        print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname}) — notifying Lark", flush=True)
         send_lark_notification(host, 'DOWN')
 
-    elif not prev_state.get('alive', True) and alive:
-        # Firewall recovered
-        db.end_downtime(host_id)
-        safe_emit('host:up', {
-            'hostname': hostname,
-            'timestamp': datetime.now().isoformat()
-        })
-        print(f"  [+] FIREWALL RECOVERED: {host['label']} ({hostname})", flush=True)
-        
-        # Fetch latest completed downtime to show duration and start time
-        last_down = db.get_latest_closed_downtime(host_id)
-        started_at = last_down.get('started_at') if last_down else None
-        duration_seconds = last_down.get('duration_seconds') if last_down else None
-        send_lark_notification(host, 'UP', started_at=started_at, duration_seconds=duration_seconds)
+    else:
+        if hostname in notified_down:
+            # Was down, now recovered
+            notified_down.discard(hostname)
+            db.end_downtime(host_id)
+            safe_emit('host:up', {
+                'hostname': hostname,
+                'timestamp': datetime.now().isoformat()
+            })
+            print(f"  [+] FIREWALL RECOVERED: {host['label']} ({hostname}) — notifying Lark", flush=True)
+            last_down = db.get_latest_closed_downtime(host_id)
+            started_at = last_down.get('started_at') if last_down else None
+            duration_seconds = last_down.get('duration_seconds') if last_down else None
+            send_lark_notification(host, 'UP', started_at=started_at, duration_seconds=duration_seconds)
 
     state = {
         'alive': alive,
@@ -837,13 +837,40 @@ def seed_defaults():
 
 
 def init_monitoring():
-    """Trigger a one-time initial scan of all firewalls in parallel background threads upon server startup."""
+    """Pre-load notified_down set from DB so we know which hosts were already down before restart.
+    Does NOT send notifications — the monitoring loop will handle first-run checks."""
     hosts = db.get_hosts()
-    print(f"  [*] Running initial one-time scan of {len(hosts)} firewalls...", flush=True)
+    print(f"  [*] Loading previous downtime state for {len(hosts)} firewalls...", flush=True)
     for h in hosts:
-        t = threading.Thread(target=run_single_check, args=(h,))
-        t.start()
-    print(f"  [*] Initial scan threads spawned for {len(hosts)} firewalls", flush=True)
+        active_down = db.has_open_downtime(h['id'])
+        if active_down:
+            # Was already down before restart — add to set so monitoring loop
+            # won't re-notify unless it recovers and goes down again
+            notified_down.add(h['hostname'])
+            print(f"  [~] {h['label']} ({h['hostname']}) was already DOWN before restart", flush=True)
+
+
+def monitoring_loop():
+    """Continuously check all active firewalls every CHECK_INTERVAL seconds."""
+    print(f"  [*] Monitoring loop started — checking every {CHECK_INTERVAL}s", flush=True)
+    # Run first check immediately on startup (no sleep)
+    hosts = db.get_hosts()
+    print(f"  [*] Initial scan — checking {len(hosts)} firewalls...", flush=True)
+    for h in hosts:
+        try:
+            run_single_check(h)
+        except Exception as e:
+            print(f"  [!] ERROR checking {h.get('label','?')}: {e}", flush=True)
+
+    while True:
+        time.sleep(CHECK_INTERVAL)
+        hosts = db.get_hosts()
+        print(f"  [*] Monitoring loop tick — checking {len(hosts)} firewalls...", flush=True)
+        for h in hosts:
+            try:
+                run_single_check(h)
+            except Exception as e:
+                print(f"  [!] ERROR checking {h.get('label','?')}: {e}", flush=True)
 
 
 def cleanup_scheduler():
@@ -889,6 +916,10 @@ if __name__ == '__main__':
     # Launch cleanup timer thread
     cleanup_thread = threading.Thread(target=cleanup_scheduler, daemon=True)
     cleanup_thread.start()
+
+    # Launch continuous monitoring loop
+    monitor_thread = threading.Thread(target=monitoring_loop, daemon=True)
+    monitor_thread.start()
 
     local_ip = get_local_ip()
     print(f"\n  Dashboard running at:")
