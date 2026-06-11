@@ -259,14 +259,19 @@ def run_single_check(host):
         active_down = db.has_open_downtime(host_id)
         prev_state = {'alive': active_down is None}
 
-    if prev_state.get('alive', True) and not alive:
-        # Firewall went down
-        db.start_downtime(host_id)
-        safe_emit('host:down', {
-            'hostname': hostname,
-            'timestamp': datetime.now().isoformat()
-        })
-        print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname})", flush=True)
+    if not alive:
+        # Firewall is offline (either just went down or remains down)
+        if prev_state.get('alive', True):
+            db.start_downtime(host_id)
+            safe_emit('host:down', {
+                'hostname': hostname,
+                'timestamp': datetime.now().isoformat()
+            })
+            print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname})", flush=True)
+        else:
+            print(f"  [!] FIREWALL REMAINS DOWN: {host['label']} ({hostname})", flush=True)
+        
+        # Always notify when a scanned host is down
         send_lark_notification(host, 'DOWN')
 
     elif not prev_state.get('alive', True) and alive:
