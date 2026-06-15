@@ -195,6 +195,8 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
             f"✔️ *System health check restored successfully.*"
         )
 
+    dashboard_url = f"http://{get_local_ip()}:{PORT}"
+
     payload = {
         "msg_type": "interactive",
         "card": {
@@ -215,6 +217,20 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
                         "tag": "lark_md",
                         "content": content
                     }
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "🖥️ Open Dashboard"
+                            },
+                            "type": "primary",
+                            "url": dashboard_url
+                        }
+                    ]
                 }
             ]
         }
@@ -813,7 +829,7 @@ DEFAULT_FIREWALLS = [
     {"label": "DAVAO", "console_url": "https://192.168.240.254:4444/webconsole/webpages/login.jsp", "branch_type": "MAJOR"},
 
     # SATELLITE BRANCHES
-    {"label": "BACOLOD", "console_url": "192.168.25.1", "branch_type": "SATELLITE"},
+    {"label": "BACOLOD", "console_url": "https://192.168.25.1:4444/", "branch_type": "SATELLITE"},
     {"label": "BATANGAS", "console_url": "https://192.168.85.1:4444/", "branch_type": "SATELLITE"},
     {"label": "CALAMBA", "console_url": "https://192.168.45.1:4444/", "branch_type": "SATELLITE"},
     {"label": "CDO", "console_url": "https://192.168.30.1:4444/", "branch_type": "SATELLITE"},
