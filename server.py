@@ -807,7 +807,7 @@ DEFAULT_FIREWALLS = [
     {"label": "PITX T2", "console_url": "https://192.168.208.254:4444/webconsole/webpages/index.jsp#83940", "branch_type": "MAJOR"},
     {"label": "PITX T3", "console_url": "https://192.168.235.254:4444/webconsole/webpages/index.jsp#52508", "branch_type": "MAJOR"},
     {"label": "PANGASINAN", "console_url": "https://192.168.100.1:4444/webconsole/webpages/index.jsp#53062", "branch_type": "MAJOR"},
-    {"label": "BEDROCK", "console_url": "https://192.168.74.254:4444/webconsole/webpages/index.jsp#80625", "branch_type": "MAJOR"},
+    {"label": "BEDROCK", "console_url": "https://192.168.71.1:4444/", "branch_type": "MAJOR"},
     {"label": "MAKATI", "console_url": "https://192.168.16.6:4444/webconsole/webpages/login.jsp#71453", "branch_type": "MAJOR"},
     {"label": "CEBU", "console_url": "https://192.168.51.1:4444/webconsole/webpages/login.jsp#19369", "branch_type": "MAJOR"},
     {"label": "DAVAO", "console_url": "https://192.168.240.254:4444/webconsole/webpages/login.jsp", "branch_type": "MAJOR"},
