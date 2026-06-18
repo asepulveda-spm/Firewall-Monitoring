@@ -239,40 +239,85 @@ function getUptimeClass(pct) {
   return 'firewall-card__uptime-fill--critical';
 }
 
-// ─── Sparkline Drawing ─────────────────────────────────────────────────────
-function drawSparkline(canvas, dataPoints) {
+// ─── Live Sparkline Drawing ────────────────────────────────────────────────
+const sparklineAnimations = {}; // hostname -> animation frame ID
+
+function drawSparkline(canvas, dataPoints, hostname) {
+  if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d');
-  const w = canvas.width = canvas.offsetWidth * 2;
-  const h = canvas.height = 56;
-  ctx.clearRect(0, 0, w, h);
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = canvas.width = rect.width * dpr;
+  const h = canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const cw = rect.width;
+  const ch = rect.height;
 
-  const valid = dataPoints.filter(d => d.latency_ms !== null && d.alive);
-  if (valid.length < 2) return;
+  ctx.clearRect(0, 0, cw, ch);
 
-  const values = valid.map(d => d.latency_ms);
-  const maxVal = Math.max(...values, 1);
-  const minVal = Math.min(...values, 0);
+  // Use last 30 data points for the sparkline
+  const recent = dataPoints.slice(-30);
+  const values = recent.map(d => (d.alive && d.latency_ms !== null) ? d.latency_ms : null);
+  const validValues = values.filter(v => v !== null);
+  if (validValues.length < 2) return;
+
+  const maxVal = Math.max(...validValues, 1);
+  const minVal = Math.min(...validValues, 0);
   const range = maxVal - minVal || 1;
+  const padding = 2;
 
+  // Draw the line with smooth curves
   ctx.beginPath();
-  ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.7)';
   ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
 
-  for (let i = 0; i < valid.length; i++) {
-    const x = (i / (valid.length - 1)) * w;
-    const y = h - ((values[i] - minVal) / range) * (h - 4) - 2;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  let firstPoint = true;
+  let lastX = 0, lastY = ch;
+
+  for (let i = 0; i < values.length; i++) {
+    const x = (i / (values.length - 1)) * cw;
+    let y;
+    if (values[i] === null) {
+      // Skip null points (down moments)
+      y = ch - padding;
+    } else {
+      y = ch - ((values[i] - minVal) / range) * (ch - padding * 2) - padding;
+    }
+    
+    if (firstPoint) {
+      ctx.moveTo(x, y);
+      firstPoint = false;
+    } else {
+      // Smooth bezier curve between points
+      const cpx = (lastX + x) / 2;
+      ctx.bezierCurveTo(cpx, lastY, cpx, y, x, y);
+    }
+    lastX = x;
+    lastY = y;
   }
   ctx.stroke();
 
-  // Fill gradient
-  const lastX = w;
-  const lastY = h - ((values[values.length - 1] - minVal) / range) * (h - 4) - 2;
-  ctx.lineTo(lastX, h); ctx.lineTo(0, h); ctx.closePath();
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, 'rgba(59, 130, 246, 0.15)');
+  // Fill area under the line
+  ctx.lineTo(cw, ch);
+  ctx.lineTo(0, ch);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, ch);
+  grad.addColorStop(0, 'rgba(59, 130, 246, 0.12)');
   grad.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
-  ctx.fillStyle = grad; ctx.fill();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw latest point dot (pulse effect)
+  if (validValues.length > 0) {
+    const lastVal = validValues[validValues.length - 1];
+    const dotY = ch - ((lastVal - minVal) / range) * (ch - padding * 2) - padding;
+    ctx.beginPath();
+    ctx.arc(cw - 1, dotY, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.9)';
+    ctx.fill();
+  }
 }
 
 // ─── Render Card ───────────────────────────────────────────────────────────

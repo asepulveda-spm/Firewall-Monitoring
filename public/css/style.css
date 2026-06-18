@@ -260,8 +260,8 @@ body {
 }
 
 /* Sparkline */
-.firewall-card__sparkline { height: 28px; margin-bottom: 8px; opacity: 0.8; }
-.firewall-card__sparkline canvas { width: 100% !important; height: 28px !important; }
+.firewall-card__sparkline { height: 36px; margin-bottom: 8px; opacity: 0.9; }
+.firewall-card__sparkline canvas { width: 100% !important; height: 36px !important; display: block; }
 
 /* Downtime Ticker */
 .firewall-card__downtime-ticker {
