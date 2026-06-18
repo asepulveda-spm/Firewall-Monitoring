@@ -200,8 +200,8 @@ def format_downtime_duration(seconds):
         return f"{secs}s"
 
 
-def send_lark_notification(host, status, started_at=None, duration_seconds=None):
-    """Send clean individual card notification to Lark."""
+def send_lark_notification(host, status, started_at=None, duration_seconds=None, is_reminder=False):
+    """Send a formatted card notification to Lark for DOWN / UP / reminder events."""
     if not LARK_WEBHOOK_URL:
         print("  [!] Lark: No webhook URL, skipping.", flush=True)
         return
@@ -209,27 +209,43 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
     label = host.get('label', host.get('hostname'))
     hostname = host.get('hostname')
     branch_type = host.get('branch_type', 'SATELLITE')
+    console_url = host.get('console_url', '')
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     dashboard_url = f"http://{get_local_ip()}:{PORT}"
 
     if status == 'DOWN':
-        title = f"🔴 DOWN ALERT [{label} BRANCH]: {hostname}"
-        color = "red"
-        content = (
-            f"**Host:** {label} ({hostname})\n"
-            f"**Status:** OFFLINE 🔴\n"
-            f"**Time:** {timestamp_str}"
-        )
+        if is_reminder:
+            title = f"⚠️ STILL DOWN [{branch_type}] {label}"
+            color = "orange"
+            content = (
+                f"**Branch:** {label}  |  **Type:** {branch_type}\n"
+                f"**IP / Host:** {hostname}\n"
+                f"**Status:** STILL OFFLINE ⚠️  *(scheduled reminder)*\n"
+                f"**Down Since:** {started_at or 'N/A'}\n"
+                f"**Duration:** {format_downtime_duration(duration_seconds)}\n"
+                f"**Checked At:** {timestamp_str}"
+            )
+        else:
+            title = f"🔴 DOWN ALERT [{branch_type}] {label}"
+            color = "red"
+            content = (
+                f"**Branch:** {label}  |  **Type:** {branch_type}\n"
+                f"**IP / Host:** {hostname}\n"
+                f"**Console URL:** {console_url or 'N/A'}\n"
+                f"**Status:** OFFLINE 🔴\n"
+                f"**Detected At:** {timestamp_str}"
+            )
     else:
         dur_str = format_downtime_duration(duration_seconds)
-        title = f"✅ RECOVERED [{label} BRANCH]: {hostname}"
+        title = f"✅ RECOVERED [{branch_type}] {label}"
         color = "green"
         content = (
-            f"**Host:** {label} ({hostname})\n"
-            f"**Status:** ONLINE ✅\n"
+            f"**Branch:** {label}  |  **Type:** {branch_type}\n"
+            f"**IP / Host:** {hostname}\n"
+            f"**Status:** BACK ONLINE ✅\n"
             f"**Down Since:** {started_at or 'N/A'}\n"
-            f"**Restored:** {timestamp_str}\n"
-            f"**Downtime:** {dur_str}"
+            f"**Restored At:** {timestamp_str}\n"
+            f"**Total Downtime:** {dur_str}"
         )
 
     payload = {
@@ -242,8 +258,14 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
             },
             "elements": [
                 {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                {"tag": "hr"},
                 {"tag": "action", "actions": [
-                    {"tag": "button", "text": {"tag": "plain_text", "content": "Open Dashboard"}, "type": "default", "url": dashboard_url}
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "📊 Open Dashboard"},
+                        "type": "primary" if status == 'DOWN' else "default",
+                        "url": dashboard_url
+                    }
                 ]}
             ]
         }
@@ -253,7 +275,7 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
         try:
             headers = {"Content-Type": "application/json"}
             res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=15)
-            print(f"  [*] Lark: {label} ({status}) — {res.status_code}", flush=True)
+            print(f"  [*] Lark: {label} ({status}{'*reminder' if is_reminder else ''}) — HTTP {res.status_code}", flush=True)
             if res.status_code == 429:
                 time.sleep(5)
                 requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=15)
@@ -331,7 +353,16 @@ def run_single_check(host):
             
             if current_hour in LARK_NOTIFY_HOURS and today_hour_key != last_key:
                 print(f"  [!] FIREWALL STILL DOWN: {host['label']} ({hostname}) — scheduled {current_hour}:00 reminder", flush=True)
-                send_lark_notification(host, 'DOWN')
+                active_down = db.has_open_downtime(host['id'])
+                started_at = active_down['started_at'] if active_down else None
+                duration_seconds = None
+                if started_at:
+                    try:
+                        started_dt = datetime.strptime(started_at, '%Y-%m-%d %H:%M:%S')
+                        duration_seconds = int((datetime.now() - started_dt).total_seconds())
+                    except Exception:
+                        pass
+                send_lark_notification(host, 'DOWN', started_at=started_at, duration_seconds=duration_seconds, is_reminder=True)
                 last_notification_time[hostname] = today_hour_key
 
     else:
@@ -972,18 +1003,100 @@ def monitoring_loop():
 
 
 def send_startup_summary(hosts):
-    """Send individual Lark cards for each firewall's status after first scan."""
+    """Send a single grouped Lark card summarizing all firewall statuses after startup scan."""
     if not LARK_WEBHOOK_URL:
         print("  [!] Lark: No webhook URL, skipping startup notifications.", flush=True)
         return
 
-    print(f"  [*] Lark: Sending startup status for {len(hosts)} firewalls...", flush=True)
+    print(f"  [*] Lark: Sending startup summary for {len(hosts)} firewalls...", flush=True)
+    dashboard_url = f"http://{get_local_ip()}:{PORT}"
+    timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    down_hosts = []
+    up_hosts = []
     for h in hosts:
         state = host_states.get(h['hostname'])
         if state and state.get('alive'):
-            send_lark_notification(h, 'UP')
+            up_hosts.append(h)
         else:
-            send_lark_notification(h, 'DOWN')
+            down_hosts.append(h)
+
+    total = len(hosts)
+    down_count = len(down_hosts)
+    up_count = len(up_hosts)
+
+    header_color = "red" if down_count > 0 else "green"
+    header_title = (
+        f"🚀 MONITORING STARTED — {down_count} DOWN / {up_count} UP"
+        if down_count > 0
+        else f"🚀 MONITORING STARTED — All {total} Firewalls ONLINE ✅"
+    )
+
+    elements = []
+
+    # Summary line
+    elements.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"**Startup Check Completed** — {timestamp_str}\n**Total Monitored:** {total}  |  🔴 DOWN: {down_count}  |  ✅ UP: {up_count}"
+        }
+    })
+
+    if up_hosts:
+        elements.append({"tag": "hr"})
+        up_lines = "\n".join(
+            f"✅ **{h['label']}** ({h['hostname']})  [{h.get('branch_type','?')}]"
+            for h in up_hosts
+        )
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**✅ Online Firewalls:**\n{up_lines}"}
+        })
+
+    if down_hosts:
+        elements.append({"tag": "hr"})
+        down_lines = "\n".join(
+            f"🔴 **{h['label']}** ({h['hostname']})  [{h.get('branch_type','?')}]"
+            for h in down_hosts
+        )
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**🔴 Offline Firewalls:**\n{down_lines}"}
+        })
+
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "action",
+        "actions": [{
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "📊 Open Dashboard"},
+            "type": "primary",
+            "url": dashboard_url
+        }]
+    })
+
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": header_title},
+                "template": header_color
+            },
+            "elements": elements
+        }
+    }
+
+    def post_request():
+        try:
+            headers = {"Content-Type": "application/json"}
+            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=15)
+            print(f"  [*] Lark: Startup summary sent — HTTP {res.status_code}", flush=True)
+        except Exception as e:
+            print(f"  [!] Lark: Startup summary failed — {e}", flush=True)
+
+    lark_queue.put(post_request)
 
 
 def _safe_check(host):
