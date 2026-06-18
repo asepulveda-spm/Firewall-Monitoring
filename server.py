@@ -17,6 +17,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime
+from queue import Queue
 
 # Load .env file if present
 try:
@@ -279,15 +280,37 @@ def send_lark_notification(host, status, started_at=None, duration_seconds=None)
 
     def post_request():
         try:
-            print(f"  [*] Lark: POSTing to webhook...", flush=True)
+            print(f"  [*] Lark: POSTing for {label} ({hostname})...", flush=True)
             headers = {"Content-Type": "application/json"}
-            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=10)
-            print(f"  [*] Lark: Response {res.status_code} — {res.text}", flush=True)
+            res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=15)
+            print(f"  [*] Lark: {label} — {res.status_code}", flush=True)
+            if res.status_code == 429:
+                time.sleep(5)
+                res = requests.post(LARK_WEBHOOK_URL, json=payload, headers=headers, timeout=15)
+                print(f"  [*] Lark: {label} retry — {res.status_code}", flush=True)
         except Exception as e:
-            print(f"  [!] Lark: POST failed — {e}", flush=True)
+            print(f"  [!] Lark: {label} POST failed — {e}", flush=True)
 
-    t = threading.Thread(target=post_request, daemon=False)
-    t.start()
+    # Queue the notification (processed sequentially by worker thread)
+    lark_queue.put(post_request)
+
+
+# Lark notification queue — sends one by one to avoid rate limiting
+lark_queue = Queue()
+
+def _lark_worker():
+    """Background worker that sends Lark notifications one at a time with spacing."""
+    while True:
+        task = lark_queue.get()
+        try:
+            task()
+        except Exception as e:
+            print(f"  [!] Lark worker error: {e}", flush=True)
+        time.sleep(1.5)  # 1.5s gap between each notification
+        lark_queue.task_done()
+
+_lark_thread = threading.Thread(target=_lark_worker, daemon=True)
+_lark_thread.start()
 
 
 def run_single_check(host):
