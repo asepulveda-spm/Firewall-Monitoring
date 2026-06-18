@@ -1,0 +1,14 @@
+# Environment variables (secrets)
+.env
+
+# Database files
+firewall_data.db
+firewall_data.db-shm
+firewall_data.db-wal
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/

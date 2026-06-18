@@ -18,6 +18,13 @@ import urllib.parse
 import urllib.error
 from datetime import datetime
 
+# Load .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, use system env vars directly
+
 # Fix Windows console encoding
 if sys.platform == 'win32':
     try:
@@ -51,7 +58,7 @@ socketio = SocketIO(
 PORT = int(os.environ.get('PORT', 5001))
 CHECK_INTERVAL = 10  # check every 10 seconds (responsive firewall checks)
 LARK_NOTIFY_HOURS = [8, 17]  # 8:00 AM and 5:00 PM daily reminders for ongoing outages
-LARK_WEBHOOK_URL = ""
+LARK_WEBHOOK_URL = os.environ.get('LARK_WEBHOOK_URL', '')
 
 def safe_emit(event, data):
     """Emit a socket event, swallowing errors so monitoring threads never crash."""
@@ -933,16 +940,18 @@ def seed_defaults():
 
 def init_monitoring():
     """Pre-load notified_down set from DB so we know which hosts were already down before restart.
-    Does NOT send notifications — the monitoring loop will handle first-run checks."""
+    On startup, sends ONE Lark notification for each host still down as a reminder."""
     hosts = db.get_hosts()
     print(f"  [*] Loading previous downtime state for {len(hosts)} firewalls...", flush=True)
     for h in hosts:
         active_down = db.has_open_downtime(h['id'])
         if active_down:
-            # Was already down before restart — add to set so monitoring loop
-            # won't re-notify unless it recovers and goes down again
             notified_down.add(h['hostname'])
-            print(f"  [~] {h['label']} ({h['hostname']}) was already DOWN before restart", flush=True)
+            # Mark as notified this hour so it won't double-notify
+            last_notification_time[h['hostname']] = datetime.now().strftime('%Y-%m-%d %H')
+            print(f"  [~] {h['label']} ({h['hostname']}) was already DOWN — sending startup reminder", flush=True)
+            # Send a reminder that this device is STILL down after restart
+            send_lark_notification(h, 'DOWN')
 
 
 def monitoring_loop():
