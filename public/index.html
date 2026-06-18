@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Enterprise firewall monitoring dashboard with real-time status and downtime tracker.">
+  <meta name="description" content="Enterprise firewall monitoring dashboard with real-time status, health scores, and downtime tracker.">
   <title>Firewall Status Center — Real-Time Monitor</title>
 
   <!-- Google Fonts -->
@@ -54,31 +54,15 @@
     <!-- Quick Add Firewall Form -->
     <div class="topbar__center">
       <form class="quick-add-form" id="addHostForm">
-        <input
-          type="text"
-          id="labelInput"
-          class="topbar__input"
-          placeholder="Branch Name (e.g. MANILA)"
-          required
-          autocomplete="off"
-        >
-        <input
-          type="text"
-          id="urlInput"
-          class="topbar__input topbar__input--url"
-          placeholder="Console URL / IP address"
-          required
-          autocomplete="off"
-          spellcheck="false"
-        >
+        <input type="text" id="labelInput" class="topbar__input" placeholder="Branch Name" required autocomplete="off">
+        <input type="text" id="urlInput" class="topbar__input topbar__input--url" placeholder="Console URL / IP" required autocomplete="off" spellcheck="false">
         <select id="branchTypeSelect" class="topbar__select">
-          <option value="SATELLITE">Satellite Branch</option>
-          <option value="MAJOR">Major Branch</option>
+          <option value="SATELLITE">Satellite</option>
+          <option value="MAJOR">Major</option>
         </select>
         <button type="submit" class="topbar__add-btn" id="addHostBtn" title="Register Firewall">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
           Add
         </button>
@@ -87,7 +71,7 @@
 
     <div class="topbar__right">
       <button class="topbar__nav-btn topbar__nav-btn--scan-all" id="scanAllBtn" onclick="triggerScanAll()" title="Scan all firewalls now">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14" class="scan-icon" style="margin-right: 2px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14" class="scan-icon" style="margin-right:2px;">
           <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
         </svg>
         Scan All
@@ -95,25 +79,28 @@
       <button class="topbar__nav-btn" onclick="openOverallLogs()" title="System downtime history logs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
-        Downtime Logs
+        Logs
       </button>
       <button class="topbar__nav-btn topbar__nav-btn--export" onclick="exportAllCSV()" title="Export all data to CSV">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
-        Export Report
+        Export
+      </button>
+      <button class="topbar__nav-btn topbar__nav-btn--sound" id="soundToggleBtn" onclick="toggleSound()" title="Toggle alert sounds">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" id="soundIcon">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </svg>
       </button>
       <div class="topbar__status" id="connectionStatus">
         <span class="status-dot"></span>
         <span class="status-text">Connected</span>
       </div>
-      <div class="topbar__clock" id="headerClock">12:00:00 PM</div>
+      <div class="topbar__clock" id="headerClock">12:00:00</div>
     </div>
   </header>
 
@@ -125,9 +112,7 @@
       <div class="stat-card">
         <div class="stat-card__icon stat-card__icon--blue">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
-            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-            <line x1="8" y1="21" x2="16" y2="21"/>
-            <line x1="12" y1="17" x2="12" y2="21"/>
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
           </svg>
         </div>
         <div class="stat-card__info">
@@ -142,33 +127,52 @@
           </svg>
         </div>
         <div class="stat-card__info">
-          <span class="stat-card__label">MAJOR BRANCHES ONLINE</span>
-          <span class="stat-card__value" id="statMajorUptime">--</span>
+          <span class="stat-card__label">ONLINE</span>
+          <span class="stat-card__value" id="statOnlineCount">--</span>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-card__icon stat-card__icon--purple">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
           </svg>
         </div>
         <div class="stat-card__info">
-          <span class="stat-card__label">SATELLITE BRANCHES ONLINE</span>
-          <span class="stat-card__value" id="statSatelliteUptime">--</span>
+          <span class="stat-card__label">AVG HEALTH SCORE</span>
+          <span class="stat-card__value" id="statAvgHealth">--</span>
         </div>
       </div>
       <div class="stat-card stat-card--alert" id="statOutagesCard">
         <div class="stat-card__icon stat-card__icon--red animate-pulse">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
         </div>
         <div class="stat-card__info">
           <span class="stat-card__label">ACTIVE OUTAGES</span>
           <span class="stat-card__value stat-card__value--red" id="statActiveOutages">0</span>
         </div>
+      </div>
+    </section>
+
+    <!-- Search & Filter Bar -->
+    <section class="filter-bar">
+      <div class="filter-bar__search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="searchInput" placeholder="Search firewalls..." autocomplete="off">
+      </div>
+      <div class="filter-bar__buttons">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="major">Major</button>
+        <button class="filter-btn" data-filter="satellite">Satellite</button>
+        <button class="filter-btn" data-filter="down">Down Only</button>
+      </div>
+      <div class="filter-bar__refresh-indicator">
+        <div class="refresh-ring" id="refreshRing"></div>
+        <span class="refresh-text" id="refreshText">Next scan in 10s</span>
       </div>
     </section>
 
@@ -185,7 +189,6 @@
           <span class="branch-column__count" id="majorCount">0 Devices</span>
         </div>
         <div class="firewall-grid" id="majorBranchesGrid">
-          <!-- Dynamically loaded Major Branch cards -->
           <div class="grid-loading">Loading major branch firewalls...</div>
         </div>
       </section>
@@ -195,12 +198,11 @@
         <div class="branch-column__header">
           <div class="branch-column__title">
             <span class="branch-badge branch-badge--satellite">SATELLITE</span>
-            <h2>Satellite branches</h2>
+            <h2>Satellite Branches</h2>
           </div>
           <span class="branch-column__count" id="satelliteCount">0 Devices</span>
         </div>
         <div class="firewall-grid" id="satelliteBranchesGrid">
-          <!-- Dynamically loaded Satellite Branch cards -->
           <div class="grid-loading">Loading satellite branch firewalls...</div>
         </div>
       </section>
@@ -214,104 +216,100 @@
       <div class="modal__header">
         <div class="modal__title-section" id="modalTitleView">
           <div class="modal__title-row">
-            <h2 class="modal__title" id="modalTitle">PITX T2 Firewall</h2>
+            <h2 class="modal__title" id="modalTitle">Firewall</h2>
             <span class="branch-badge" id="modalBranchBadge">MAJOR</span>
             <span class="status-pill status-pill--up" id="modalStatusPill">ONLINE</span>
           </div>
-          <p class="modal__subtitle" id="modalSubtitle">IP: 192.168.208.254 | Port: 4444</p>
+          <p class="modal__subtitle" id="modalSubtitle">IP: --</p>
         </div>
-        <div class="modal__edit-section" id="modalTitleEdit" style="display: none; width: 100%;">
-          <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px; width: 100%;">
-            <input type="text" id="editLabelInput" class="topbar__input" style="max-width: 250px;" placeholder="Branch Label">
+        <div class="modal__edit-section" id="modalTitleEdit" style="display:none;width:100%;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;width:100%;">
+            <input type="text" id="editLabelInput" class="topbar__input" style="max-width:250px;" placeholder="Branch Label">
             <select id="editBranchTypeSelect" class="topbar__select">
               <option value="MAJOR">MAJOR</option>
               <option value="SATELLITE">SATELLITE</option>
             </select>
           </div>
-          <input type="text" id="editUrlInput" class="topbar__input" style="width: 100%; font-family: var(--font-mono); font-size: 0.8rem;" placeholder="Console URL or IP Address">
+          <input type="text" id="editUrlInput" class="topbar__input" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;" placeholder="Console URL or IP Address">
         </div>
         <button class="btn-close" id="closeModal" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
       </div>
 
       <div class="modal-body-layout">
-        <!-- Latency Chart & Status Overview -->
         <div class="modal-left-panel">
           <div class="time-range" id="timeRange">
-            <button class="time-range__btn active" data-range="1h">1 HOUR</button>
-            <button class="time-range__btn" data-range="6h">6 HOURS</button>
-            <button class="time-range__btn" data-range="24h">24 HOURS</button>
-            <button class="time-range__btn" data-range="7d">7 DAYS</button>
+            <button class="time-range__btn active" data-range="1h">1H</button>
+            <button class="time-range__btn" data-range="6h">6H</button>
+            <button class="time-range__btn" data-range="24h">24H</button>
+            <button class="time-range__btn" data-range="7d">7D</button>
           </div>
 
           <div class="modal-stats">
             <div class="modal-stat">
-              <span class="modal-stat__label">MIN LATENCY</span>
+              <span class="modal-stat__label">MIN</span>
               <span class="modal-stat__value" id="modalStatMin">--</span>
             </div>
             <div class="modal-stat">
-              <span class="modal-stat__label">AVG LATENCY</span>
+              <span class="modal-stat__label">AVG</span>
               <span class="modal-stat__value" id="modalStatAvg">--</span>
             </div>
             <div class="modal-stat">
-              <span class="modal-stat__label">MAX LATENCY</span>
+              <span class="modal-stat__label">MAX</span>
               <span class="modal-stat__value" id="modalStatMax">--</span>
             </div>
             <div class="modal-stat">
-              <span class="modal-stat__label">PACKET LOSS</span>
+              <span class="modal-stat__label">LOSS</span>
               <span class="modal-stat__value modal-stat__value--loss" id="modalStatLoss">--</span>
+            </div>
+            <div class="modal-stat">
+              <span class="modal-stat__label">JITTER</span>
+              <span class="modal-stat__value" id="modalStatJitter">--</span>
+            </div>
+            <div class="modal-stat">
+              <span class="modal-stat__label">HEALTH</span>
+              <span class="modal-stat__value" id="modalStatHealth">--</span>
             </div>
           </div>
 
-          <!-- Chart canvas -->
           <div class="modal-chart-container">
             <canvas id="historyChart"></canvas>
           </div>
         </div>
 
-        <!-- Outage logs / Details -->
         <div class="modal-right-panel">
           <h3 class="panel-section-title">Downtime Outage Logs</h3>
           <div class="downtime-timeline-wrap">
-            <div class="downtime-timeline" id="downtimeTimeline">
-              <!-- Logs loaded dynamically -->
-            </div>
+            <div class="downtime-timeline" id="downtimeTimeline"></div>
           </div>
           <div class="modal-actions-panel" id="modalActionsView">
             <a href="" target="_blank" class="modal-action-btn modal-action-btn--primary" id="modalConsoleLink">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15 3 21 3 21 9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
+                <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
               </svg>
-              Open Web Console
+              Open Console
             </a>
-            <button class="modal-action-btn" id="modalEditBtn" style="border: 1px solid rgba(245,158,11,0.4); color: var(--yellow); background: rgba(245,158,11,0.05);">
+            <button class="modal-action-btn" id="modalEditBtn" style="border:1px solid rgba(245,158,11,0.4);color:var(--yellow);background:rgba(245,158,11,0.05);">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
               </svg>
-              Edit Settings
+              Edit
             </button>
             <button class="modal-action-btn modal-action-btn--danger" id="modalDeleteBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
-              Remove Firewall
+              Remove
             </button>
           </div>
-          
-          <div class="modal-actions-panel" id="modalActionsEdit" style="display: none; gap: 8px;">
-            <button class="modal-action-btn modal-action-btn--primary" id="modalSaveBtn" style="flex: 1;">
-              Save Changes
-            </button>
-            <button class="modal-action-btn modal-action-btn--danger" id="modalCancelBtn" style="flex: 1;">
-              Cancel
-            </button>
+          <div class="modal-actions-panel" id="modalActionsEdit" style="display:none;gap:8px;">
+            <button class="modal-action-btn modal-action-btn--primary" id="modalSaveBtn" style="flex:1;">Save Changes</button>
+            <button class="modal-action-btn modal-action-btn--danger" id="modalCancelBtn" style="flex:1;">Cancel</button>
           </div>
         </div>
       </div>
@@ -328,34 +326,33 @@
         </div>
         <button class="btn-close" id="closeOverallLogsModal" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
       </div>
 
       <div class="time-range" id="overallLogsRange">
-        <button class="time-range__btn active" data-range="1h">1 HOUR</button>
-        <button class="time-range__btn" data-range="6h">6 HOURS</button>
-        <button class="time-range__btn" data-range="24h">24 HOURS</button>
-        <button class="time-range__btn" data-range="7d">7 DAYS</button>
+        <button class="time-range__btn active" data-range="1h">1H</button>
+        <button class="time-range__btn" data-range="6h">6H</button>
+        <button class="time-range__btn" data-range="24h">24H</button>
+        <button class="time-range__btn" data-range="7d">7D</button>
       </div>
 
       <div class="logs-summary" id="overallLogsSummary">
         <div class="logs-summary__item">
-          <span class="logs-summary__label">TOTAL DOWNTIME EVENTS</span>
+          <span class="logs-summary__label">TOTAL EVENTS</span>
           <span class="logs-summary__value" id="ovTotalEvents">0</span>
         </div>
         <div class="logs-summary__item">
-          <span class="logs-summary__label">AFFECTED GATEWAYS</span>
+          <span class="logs-summary__label">AFFECTED</span>
           <span class="logs-summary__value logs-summary__value--yellow" id="ovHostsAffected">0</span>
         </div>
         <div class="logs-summary__item">
-          <span class="logs-summary__label">ACCUMULATED OFFLINE TIME</span>
-          <span class="logs-summary__value logs-summary__value--red" id="ovTotalDowntime">0h 0m</span>
+          <span class="logs-summary__label">TOTAL OFFLINE</span>
+          <span class="logs-summary__value logs-summary__value--red" id="ovTotalDowntime">0m</span>
         </div>
         <div class="logs-summary__item">
-          <span class="logs-summary__label">LONGEST SINGLE OUTAGE</span>
+          <span class="logs-summary__label">LONGEST OUTAGE</span>
           <span class="logs-summary__value logs-summary__value--red" id="ovLongestOutage">--</span>
         </div>
       </div>
@@ -366,14 +363,14 @@
             <tr>
               <th>FIREWALL</th>
               <th>BRANCH</th>
-              <th>CHECK STATUS</th>
+              <th>STATUS</th>
               <th>OFFLINE START</th>
-              <th>RESTORED AT</th>
-              <th>TOTAL DOWNTIME</th>
+              <th>RESTORED</th>
+              <th>DURATION</th>
             </tr>
           </thead>
           <tbody id="overallLogsTableBody">
-            <tr><td colspan="6" class="logs-empty">No logged outage events in this period</td></tr>
+            <tr><td colspan="6" class="logs-empty">No logged outage events</td></tr>
           </tbody>
         </table>
       </div>

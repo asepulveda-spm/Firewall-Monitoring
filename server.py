@@ -50,7 +50,8 @@ socketio = SocketIO(
 
 PORT = int(os.environ.get('PORT', 5001))
 CHECK_INTERVAL = 10  # check every 10 seconds (responsive firewall checks)
-LARK_WEBHOOK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/1bce6561-7a37-40bc-9a9b-b72db594c990"
+LARK_NOTIFY_HOURS = [8, 17]  # 8:00 AM and 5:00 PM daily reminders for ongoing outages
+LARK_WEBHOOK_URL = ""
 
 def safe_emit(event, data):
     """Emit a socket event, swallowing errors so monitoring threads never crash."""
@@ -88,6 +89,8 @@ def parse_host_info(url_or_ip):
 ping_threads = {}    # hostname -> threading.Event (stop signal)
 host_states = {}     # hostname -> {'alive': bool, 'ping_alive': bool, 'console_alive': bool}
 notified_down = set()  # hostnames already notified as DOWN (cleared when they recover)
+last_notification_time = {}  # hostname -> last Lark notification timestamp
+latency_history = {}  # hostname -> list of recent latencies (for jitter/trend)
 
 
 def parse_ping_output(output):
@@ -96,6 +99,37 @@ def parse_ping_output(output):
     if match:
         return float(match.group(1))
     return None
+
+
+def calculate_jitter(hostname):
+    """Calculate jitter (variation in latency) from recent measurements."""
+    history = latency_history.get(hostname, [])
+    valid = [l for l in history if l is not None]
+    if len(valid) < 2:
+        return 0.0
+    diffs = [abs(valid[i] - valid[i-1]) for i in range(1, len(valid))]
+    return round(sum(diffs) / len(diffs), 2)
+
+
+def calculate_health_score(hostname, host_id):
+    """Calculate a 0-100 health score based on uptime, latency, jitter."""
+    stats = db.get_stats(host_id, '-1 hour')
+    if not stats or not stats['total']:
+        return 100  # No data yet = assume healthy
+    
+    # Uptime component (60% weight)
+    uptime_pct = (1 - stats['lost'] / stats['total']) * 100
+    uptime_score = uptime_pct * 0.6
+    
+    # Latency component (25% weight) — lower is better, 0ms=perfect, 200ms+=bad
+    avg_latency = stats['avg_ms'] or 0
+    latency_score = max(0, (1 - min(avg_latency, 200) / 200)) * 25
+    
+    # Jitter component (15% weight) — lower is better, 0ms=perfect, 50ms+=bad
+    jitter = calculate_jitter(hostname)
+    jitter_score = max(0, (1 - min(jitter, 50) / 50)) * 15
+    
+    return round(uptime_score + latency_score + jitter_score)
 
 
 def ping_host(hostname):
@@ -286,14 +320,27 @@ def run_single_check(host):
                 'hostname': hostname,
                 'timestamp': datetime.now().isoformat()
             })
-        # Always notify Lark every check while down
-        print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname}) — notifying Lark", flush=True)
-        send_lark_notification(host, 'DOWN')
+            # Notify Lark IMMEDIATELY on first detection (any time of day)
+            print(f"  [!] FIREWALL DOWN: {host['label']} ({hostname}) — notifying Lark immediately", flush=True)
+            send_lark_notification(host, 'DOWN')
+            last_notification_time[hostname] = datetime.now().strftime('%Y-%m-%d %H')
+        else:
+            # Already down — only re-notify at 8:00 AM and 5:00 PM
+            now = datetime.now()
+            current_hour = now.hour
+            today_hour_key = now.strftime('%Y-%m-%d') + f' {current_hour}'
+            last_key = last_notification_time.get(hostname, '')
+            
+            if current_hour in LARK_NOTIFY_HOURS and today_hour_key != last_key:
+                print(f"  [!] FIREWALL STILL DOWN: {host['label']} ({hostname}) — scheduled {current_hour}:00 reminder", flush=True)
+                send_lark_notification(host, 'DOWN')
+                last_notification_time[hostname] = today_hour_key
 
     else:
         if hostname in notified_down:
             # Was down, now recovered
             notified_down.discard(hostname)
+            last_notification_time.pop(hostname, None)
             db.end_downtime(host_id)
             safe_emit('host:up', {
                 'hostname': hostname,
@@ -312,6 +359,17 @@ def run_single_check(host):
     }
     host_states[hostname] = state
 
+    # Track latency history for jitter calculation
+    if hostname not in latency_history:
+        latency_history[hostname] = []
+    latency_history[hostname].append(latency)
+    if len(latency_history[hostname]) > 30:
+        latency_history[hostname].pop(0)
+
+    # Calculate health metrics
+    jitter = calculate_jitter(hostname)
+    health_score = calculate_health_score(hostname, host_id)
+
     # Emit real-time status data to clients
     safe_emit('ping:result', {
         'hostname': hostname,
@@ -320,6 +378,8 @@ def run_single_check(host):
         'ping_alive': ping_alive,
         'console_alive': console_alive,
         'alive': alive,
+        'jitter': jitter,
+        'health_score': health_score,
     })
     
     return state
@@ -386,6 +446,10 @@ def api_get_hosts():
 
         # Get latest check state
         current_state = get_current_host_state(h)
+        
+        # Health metrics
+        jitter = calculate_jitter(h['hostname'])
+        health_score = calculate_health_score(h['hostname'], h['id'])
 
         enriched.append({
             **h,
@@ -393,7 +457,9 @@ def api_get_hosts():
             'is_down': active_down is not None,
             'down_since': down_since,
             'downtime_duration': downtime_duration,
-            'current_state': current_state
+            'current_state': current_state,
+            'jitter': jitter,
+            'health_score': health_score,
         })
     return jsonify(enriched)
 
@@ -775,40 +841,53 @@ def api_export_all():
 # --- Socket.IO Events -------------------------------------------------------
 
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None):
     print(f"  [*] Client connected: {request.sid}", flush=True)
-    hosts = db.get_hosts()
-    for h in hosts:
-        recent_pings = db.get_latest_pings(h['id'], 60)
-        stats = db.get_stats(h['id'], '-1 hour')
-        active_down = db.has_open_downtime(h['id'])
-        
-        down_since = None
-        downtime_duration = 0
-        if active_down:
-            down_since = active_down['started_at']
+    try:
+        hosts = db.get_hosts()
+        for h in hosts:
             try:
-                started_dt = datetime.strptime(down_since, '%Y-%m-%d %H:%M:%S')
-                downtime_duration = int((datetime.now() - started_dt).total_seconds())
+                recent_pings = db.get_latest_pings(h['id'], 60)
+                stats = db.get_stats(h['id'], '-1 hour')
+                active_down = db.has_open_downtime(h['id'])
             except Exception:
-                pass
+                recent_pings = []
+                stats = {'total': 0, 'lost': 0, 'min_ms': None, 'avg_ms': None, 'max_ms': None}
+                active_down = None
 
-        current_state = get_current_host_state(h)
+            down_since = None
+            downtime_duration = 0
+            if active_down:
+                down_since = active_down['started_at']
+                try:
+                    started_dt = datetime.strptime(down_since, '%Y-%m-%d %H:%M:%S')
+                    downtime_duration = int((datetime.now() - started_dt).total_seconds())
+                except Exception:
+                    pass
 
-        emit('host:init', {
-            'host': h,
-            'recentPings': recent_pings,
-            'stats': stats,
-            'is_down': active_down is not None,
-            'down_since': down_since,
-            'downtime_duration': downtime_duration,
-            'current_state': current_state
-        })
+            current_state = get_current_host_state(h)
 
-    # Send all alert thresholds
-    thresholds = db.get_all_alert_thresholds()
-    for t in thresholds:
-        emit('alert:updated', t)
+            emit('host:init', {
+                'host': h,
+                'recentPings': recent_pings,
+                'stats': stats,
+                'is_down': active_down is not None,
+                'down_since': down_since,
+                'downtime_duration': downtime_duration,
+                'current_state': current_state,
+                'jitter': calculate_jitter(h['hostname']),
+                'health_score': calculate_health_score(h['hostname'], h['id']),
+            })
+
+        # Send all alert thresholds
+        try:
+            thresholds = db.get_all_alert_thresholds()
+            for t in thresholds:
+                emit('alert:updated', t)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"  [!] Error during client init: {e}", flush=True)
 
 
 @socketio.on('disconnect')
@@ -867,26 +946,38 @@ def init_monitoring():
 
 
 def monitoring_loop():
-    """Continuously check all active firewalls every CHECK_INTERVAL seconds."""
-    print(f"  [*] Monitoring loop started — checking every {CHECK_INTERVAL}s", flush=True)
-    # Run first check immediately on startup (no sleep)
+    """Continuously check all active firewalls every CHECK_INTERVAL seconds using parallel threads."""
+    print(f"  [*] Monitoring loop started — checking every {CHECK_INTERVAL}s (parallel)", flush=True)
+    # Run first check immediately on startup
     hosts = db.get_hosts()
-    print(f"  [*] Initial scan — checking {len(hosts)} firewalls...", flush=True)
+    print(f"  [*] Initial scan — checking {len(hosts)} firewalls in parallel...", flush=True)
+    
+    threads = []
     for h in hosts:
-        try:
-            run_single_check(h)
-        except Exception as e:
-            print(f"  [!] ERROR checking {h.get('label','?')}: {e}", flush=True)
+        t = threading.Thread(target=_safe_check, args=(h,), daemon=True)
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
 
     while True:
         time.sleep(CHECK_INTERVAL)
         hosts = db.get_hosts()
-        print(f"  [*] Monitoring loop tick — checking {len(hosts)} firewalls...", flush=True)
+        threads = []
         for h in hosts:
-            try:
-                run_single_check(h)
-            except Exception as e:
-                print(f"  [!] ERROR checking {h.get('label','?')}: {e}", flush=True)
+            t = threading.Thread(target=_safe_check, args=(h,), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+
+def _safe_check(host):
+    """Wrapper to catch exceptions in monitoring threads."""
+    try:
+        run_single_check(host)
+    except Exception as e:
+        print(f"  [!] ERROR checking {host.get('label','?')}: {e}", flush=True)
 
 
 def cleanup_scheduler():

@@ -21,6 +21,7 @@ def get_connection():
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")   # faster writes, still safe
+        conn.execute("PRAGMA busy_timeout=10000")   # wait up to 10s if locked
         conn.execute("PRAGMA cache_size=-8000")     # 8 MB page cache
         conn.execute("PRAGMA foreign_keys=ON")
         _local.conn = conn
