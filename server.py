@@ -935,6 +935,7 @@ DEFAULT_FIREWALLS = [
     {"label": "MAKATI", "console_url": "https://192.168.16.6:4444/webconsole/webpages/login.jsp#71453", "branch_type": "MAJOR"},
     {"label": "CEBU", "console_url": "https://192.168.51.1:4444/webconsole/webpages/login.jsp#19369", "branch_type": "MAJOR"},
     {"label": "DAVAO", "console_url": "https://192.168.240.254:4444/webconsole/webpages/login.jsp", "branch_type": "MAJOR"},
+    {"label": "VITRO", "console_url": "https://172.16.128.254:4444/", "branch_type": "MAJOR"},
 
     # SATELLITE BRANCHES
     {"label": "BACOLOD", "console_url": "https://192.168.25.1:4444/", "branch_type": "SATELLITE"},
